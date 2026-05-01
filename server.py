@@ -5,8 +5,18 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
 
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 app = Flask(__name__)
 CORS(app)
+
+# Rate limit
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["30 per minute"]
+)
 
 # OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -59,7 +69,15 @@ def save_chat(user_message, ai_reply, page_url):
         print("❌ Supabase error:", e)
 
 
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({
+        "reply": "Слишком много запросов. Подождите несколько секунд и попробуйте снова."
+    }), 429
+
+
 @app.route("/chat", methods=["POST"])
+@limiter.limit("5 per 10 seconds")
 def chat():
     data = request.json or {}
     user_message = data.get("message", "")
@@ -104,7 +122,6 @@ def chat():
 
     ai_reply = response.output_text
 
-    # 💥 СОХРАНЕНИЕ В БАЗУ
     save_chat(user_message, ai_reply, page_url)
 
     return jsonify({"reply": ai_reply})
