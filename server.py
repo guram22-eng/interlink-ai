@@ -69,6 +69,34 @@ def save_chat(user_message, ai_reply, page_url):
         print("❌ Supabase error:", e)
 
 
+# 🔥 НОВОЕ — получение истории
+def get_history():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return ""
+
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/chat_logs?select=user_message,ai_reply&order=id.desc&limit=5",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+            },
+            timeout=5,
+        )
+
+        data = res.json()
+
+        history_text = ""
+        for row in reversed(data):
+            history_text += f"Клиент: {row['user_message']}\nAI: {row['ai_reply']}\n"
+
+        return history_text
+
+    except Exception as e:
+        print("history error:", e)
+        return ""
+
+
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify({
@@ -86,35 +114,25 @@ def chat():
     if not user_message:
         return jsonify({"reply": "Напишите вопрос, и я помогу вам."})
 
+    # 🔥 НОВОЕ — берём историю
+    history = get_history()
+
     response = client.responses.create(
         model="gpt-5.4-mini",
         input=f"""
+{history}
+
 Ты профессиональный AI-консультант компании Interlink (Грузия).
 
 О компании:
 - Официальный дистрибьютор Mitsubishi Electric в Грузии
 - Работаем с 2014 года
 - 150+ реализованных проектов
-- Даем гарантию на оборудование и монтаж
-
-Чем занимаемся:
-- кондиционирование
-- VRF системы
-- вентиляция и рекуперация
-- решения для квартир, домов, офисов, гостиниц и бизнеса
-
-Твоя задача:
-1. Помочь выбрать решение
-2. Объяснить простым языком
-3. Дать уверенность клиенту
-4. Подвести к контакту
 
 Правила:
 - отвечай коротко (2-4 предложения)
-- говори как эксперт
 - не выдумывай цены
-- если клиент хочет подбор — предложи бесплатную консультацию
-- мягко предложи оставить телефон или написать в WhatsApp / Telegram
+- веди к контакту
 
 Вопрос клиента: {user_message}
 """
