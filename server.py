@@ -1,4 +1,6 @@
 import os
+import re
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
@@ -6,8 +8,12 @@ from openai import OpenAI
 app = Flask(__name__)
 CORS(app)
 
-# 🔑 ключ берётся из Render (Environment)
+# OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 
 @app.route("/", methods=["GET"])
@@ -15,10 +21,49 @@ def home():
     return "Interlink AI server is running"
 
 
+def extract_phone(text):
+    match = re.search(r"(\+?\d[\d\s\-\(\)]{7,}\d)", text)
+    return match.group(1) if match else None
+
+
+def save_chat(user_message, ai_reply, page_url):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("❌ Supabase env missing")
+        return
+
+    phone = extract_phone(user_message)
+    status = "lead" if phone else "new"
+
+    try:
+        res = requests.post(
+            f"{SUPABASE_URL}/rest/v1/chat_logs",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            json={
+                "user_message": user_message,
+                "ai_reply": ai_reply,
+                "page_url": page_url,
+                "phone": phone,
+                "status": status,
+            },
+            timeout=10,
+        )
+
+        print("✅ Supabase:", res.status_code)
+
+    except Exception as e:
+        print("❌ Supabase error:", e)
+
+
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json or {}
     user_message = data.get("message", "")
+    page_url = data.get("page_url") or request.headers.get("Origin")
 
     if not user_message:
         return jsonify({"reply": "Напишите вопрос, и я помогу вам."})
@@ -57,9 +102,13 @@ def chat():
 """
     )
 
-    return jsonify({"reply": response.output_text})
+    ai_reply = response.output_text
+
+    # 💥 СОХРАНЕНИЕ В БАЗУ
+    save_chat(user_message, ai_reply, page_url)
+
+    return jsonify({"reply": ai_reply})
 
 
-# 🔥 важно для Render
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
