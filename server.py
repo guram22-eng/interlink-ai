@@ -260,8 +260,7 @@ def chat():
         return jsonify({"reply": "Напишите вопрос, и я помогу вам."})
 
     try:
-        history = get_history()
-
+        
         response = client.responses.create(
             model="gpt-5.4-mini",
             input=f"""
