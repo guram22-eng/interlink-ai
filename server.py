@@ -23,9 +23,8 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
-
+EMAIL_USER = "interlink.ai.leads@gmail.com"
+EMAIL_PASS = "qucnhztnolhyunqa"
 
 PRODUCTS_KNOWLEDGE = """
 Если клиент не ограничен бюджетом — предлагай MSZ-LN в первую очередь.
