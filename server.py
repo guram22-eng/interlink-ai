@@ -1,12 +1,16 @@
 import os
 import re
 import requests
+import smtplib
+from email.mime.text import MIMEText
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
 
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+
 
 app = Flask(__name__)
 CORS(app)
@@ -22,12 +26,17 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
+
 
 PRODUCTS_KNOWLEDGE = """
 БАЗА ЗНАНИЙ INTERLINK / MITSUBISHI ELECTRIC
 
 Бытовые кондиционеры:
+
 Если клиент не ограничен бюджетом — всегда начинай с MSZ-LN.
+
 Приоритет рекомендаций:
 1. MSZ-LN — предлагать в первую очередь
 2. MSZ-EF — если важен дизайн или LN не подходит
@@ -43,16 +52,14 @@ MSZ-LN (Premium):
 - 3D I-SEE датчик: определяет людей и регулирует поток воздуха
 - Plasma Quad Plus: очистка от вирусов, бактерий, аллергенов, PM2.5
 - подходит для премиум квартир, домов, спален, гостиных
-- предлагать клиентам, которым важны комфорт, тишина, технологии и дизайн
 
 MSZ-EF (Design Inverter):
-- дизайнерская серия, разработана с акцентом на интерьер
+- дизайнерская серия
 - 3 цвета: белый, серебристый, черный
 - тихая работа: от 19 дБ
 - энергоэффективность A+++ (SEER до 9.1)
 - встроенный Wi-Fi
 - антивирусный фильтр V Blocking с ионами серебра
-- пульт с подсветкой и недельным таймером
 - подходит для современных квартир, спален, гостиных, дизайнерских интерьеров
 
 MSZ-AP (Standard Inverter):
@@ -62,9 +69,7 @@ MSZ-AP (Standard Inverter):
 - высокая энергоэффективность
 - встроенный Wi-Fi
 - работает в мульти-сплит системах
-- можно использовать при замене старых систем без замены трассы
 - подходит для квартир, офисов, спален, гостиных
-- хороший основной вариант для большинства клиентов
 
 MSZ-HR (Classic Inverter):
 - доступная серия Mitsubishi Electric
@@ -72,9 +77,30 @@ MSZ-HR (Classic Inverter):
 - энергоэффективность A++ охлаждение / A+ обогрев
 - ECONO COOL
 - авторестарт после отключения питания
-- охлаждение до -10°C
 - Wi-Fi как опция
 - подходит для клиентов с ограниченным бюджетом, квартир и офисов
+
+Цены (ориентир по мощности, только оборудование):
+
+MSZ-LN:
+- 25 (до 25 м²) — от 1700$
+- 35 (до 35 м²) — от 1900$
+- 50 (до 50 м²) — от 2300$
+
+MSZ-EF:
+- 25 (до 25 м²) — от 1300$
+- 35 (до 35 м²) — от 1400$
+- 50 (до 50 м²) — от 2000$
+
+MSZ-AP:
+- 25 (до 25 м²) — от 1200$
+- 35 (до 35 м²) — от 1300$
+- 50 (до 50 м²) — от 1700$
+
+Важно по ценам:
+- цены указаны только за оборудование
+- монтаж, трасса и дополнительные материалы рассчитываются отдельно
+- точную цену подтверждать после подбора модели
 
 Мульти-сплит:
 
@@ -109,6 +135,7 @@ CITY MULTI / VRF:
 
 Правила подбора:
 - если клиент спрашивает “что лучше” — сначала уточни площадь, тип объекта, количество комнат и бюджет
+- если клиент спрашивает цену — называй ориентир по мощности и уточняй, что это только оборудование
 - если нужен премиум — предлагай MSZ-LN
 - если важен дизайн — MSZ-EF
 - если нужен оптимальный вариант — MSZ-AP
@@ -116,7 +143,6 @@ CITY MULTI / VRF:
 - если несколько комнат — MXZ
 - если скрытый потолочный монтаж — MLZ-KP
 - если большой объект — VRF / CITY MULTI
-- цены не выдумывать
 """
 
 
@@ -130,13 +156,40 @@ def extract_phone(text):
     return match.group(1) if match else None
 
 
+def send_email(subject, body):
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("❌ Email env missing")
+        return
+
+    try:
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_USER
+        msg["To"] = EMAIL_USER
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.send_message(msg)
+
+        print("📧 Email sent")
+
+    except Exception as e:
+        print("❌ Email error:", e)
+
+
 def save_chat(user_message, ai_reply, page_url):
+    phone = extract_phone(user_message)
+    status = "lead" if phone else "new"
+
+    if status == "lead":
+        send_email(
+            "🔥 Новый лид с сайта Interlink",
+            f"Сообщение клиента:\n{user_message}\n\nТелефон: {phone}\n\nСтраница: {page_url}\n\nОтвет AI:\n{ai_reply}"
+        )
+
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("❌ Supabase env missing")
         return
-
-    phone = extract_phone(user_message)
-    status = "lead" if phone else "new"
 
     try:
         res = requests.post(
@@ -206,11 +259,12 @@ def chat():
     if not user_message:
         return jsonify({"reply": "Напишите вопрос, и я помогу вам."})
 
-    history = get_history()
+    try:
+        history = get_history()
 
-    response = client.responses.create(
-        model="gpt-5.4-mini",
-        input=f"""
+        response = client.responses.create(
+            model="gpt-5.4-mini",
+            input=f"""
 {history}
 
 {PRODUCTS_KNOWLEDGE}
@@ -226,6 +280,7 @@ def chat():
 Правила ответа:
 - отвечай на языке клиента
 - отвечай коротко: 2–4 предложения
+- не используй markdown и символы **
 - говори как эксперт, но простыми словами
 - не выдумывай цены
 - не перегружай клиента техническими деталями
@@ -234,9 +289,15 @@ def chat():
 
 Вопрос клиента: {user_message}
 """
-    )
+        )
 
-    ai_reply = response.output_text
+        ai_reply = response.output_text
+
+    except Exception as e:
+        print("❌ OpenAI error:", e)
+        return jsonify({
+            "reply": "Сейчас есть временная ошибка связи с AI. Пожалуйста, попробуйте ещё раз через минуту."
+        }), 500
 
     save_chat(user_message, ai_reply, page_url)
 
