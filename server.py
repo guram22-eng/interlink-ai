@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import smtplib
+import threading
 from email.mime.text import MIMEText
 
 from flask import Flask, request, jsonify
@@ -161,20 +162,23 @@ def send_email(subject, body):
         print("❌ Email env missing")
         return
 
-    try:
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_USER
-        msg["To"] = EMAIL_USER
+    def _send():
+        try:
+            msg = MIMEText(body, "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"] = EMAIL_USER
+            msg["To"] = EMAIL_USER
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.send_message(msg)
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=5) as server:
+                server.login(EMAIL_USER, EMAIL_PASS)
+                server.send_message(msg)
 
-        print("📧 Email sent")
+            print("📧 Email sent")
 
-    except Exception as e:
-        print("❌ Email error:", e)
+        except Exception as e:
+            print("❌ Email error:", e)
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def save_chat(user_message, ai_reply, page_url):
@@ -215,33 +219,6 @@ def save_chat(user_message, ai_reply, page_url):
         print("❌ Supabase error:", e)
 
 
-def get_history():
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return ""
-
-    try:
-        res = requests.get(
-            f"{SUPABASE_URL}/rest/v1/chat_logs?select=user_message,ai_reply&order=id.desc&limit=5",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-            },
-            timeout=5,
-        )
-
-        data = res.json()
-
-        history_text = ""
-        for row in reversed(data):
-            history_text += f"Клиент: {row['user_message']}\nAI: {row['ai_reply']}\n"
-
-        return history_text
-
-    except Exception as e:
-        print("history error:", e)
-        return ""
-
-
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify({
@@ -260,12 +237,9 @@ def chat():
         return jsonify({"reply": "Напишите вопрос, и я помогу вам."})
 
     try:
-        
         response = client.responses.create(
             model="gpt-5.4-mini",
             input=f"""
-{history}
-
 {PRODUCTS_KNOWLEDGE}
 
 Ты профессиональный AI-консультант компании Interlink (Грузия).
