@@ -26,32 +26,6 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 EMAIL_USER = "interlink.ai.leads@gmail.com"
 EMAIL_PASS = "qucnhztnolhyunqa"
 
-PRODUCTS_KNOWLEDGE = """
-Если клиент не ограничен бюджетом — предлагай MSZ-LN в первую очередь.
-
-Серии:
-- MSZ-LN — премиум, тихий, лучший выбор
-- MSZ-EF — дизайнерский
-- MSZ-AP — универсальный
-- MSZ-HR — бюджет
-
-Цены (оборудование):
-MSZ-LN 25 — от 1700$
-MSZ-LN 35 — от 1900$
-MSZ-LN 50 — от 2300$
-
-MSZ-EF 25 — от 1300$
-MSZ-EF 35 — от 1400$
-MSZ-EF 50 — от 2000$
-
-MSZ-AP 25 — от 1200$
-MSZ-AP 35 — от 1300$
-MSZ-AP 50 — от 1700$
-
-Важно:
-цены только за оборудование, монтаж отдельно
-"""
-
 
 @app.route("/")
 def home():
@@ -114,8 +88,63 @@ def save_chat(user_message, ai_reply, page_url):
             },
             timeout=5,
         )
-    except:
-        pass
+    except Exception as e:
+        print("save chat error:", e)
+
+
+def search_products(user_message):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/products",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+            },
+            params={
+                "select": "brand,series,model,type,power,area_m2,price,description",
+                "is_active": "eq.true",
+                "limit": "8",
+            },
+            timeout=5,
+        )
+
+        if response.status_code != 200:
+            print("products error:", response.status_code, response.text)
+            return []
+
+        return response.json()
+
+    except Exception as e:
+        print("products search error:", e)
+        return []
+
+
+def build_products_context(products):
+    if not products:
+        return "Товары из базы не найдены."
+
+    lines = []
+
+    for p in products:
+        brand = p.get("brand") or ""
+        series = p.get("series") or ""
+        model = p.get("model") or ""
+        product_type = p.get("type") or ""
+        power = p.get("power") or ""
+        area_m2 = p.get("area_m2") or ""
+        price = p.get("price") or ""
+        description = p.get("description") or ""
+
+        lines.append(
+            f"- {brand} {model}, серия {series}, {product_type}, "
+            f"мощность {power}, площадь {area_m2} м², "
+            f"цена {price}$, {description}"
+        )
+
+    return "\n".join(lines)
 
 
 @app.route("/chat", methods=["POST"])
@@ -127,15 +156,28 @@ def chat():
     if not user_message:
         return jsonify({"reply": "Напишите вопрос"})
 
+    products = search_products(user_message)
+    products_context = build_products_context(products)
+
     try:
         response = client.responses.create(
             model="gpt-5.4-mini",
             input=f"""
-{PRODUCTS_KNOWLEDGE}
-
 Ты эксперт Interlink. Отвечай коротко, 2-3 предложения.
 
-Вопрос: {user_message}
+Правила:
+- Если клиент не ограничен бюджетом — предлагай MSZ-LN в первую очередь.
+- Цены указываются только за оборудование.
+- Монтаж считается отдельно.
+- Не выдумывай модели и цены.
+- Используй товары только из базы ниже.
+- Если точного товара нет, скажи что лучше уточнить площадь, тип помещения и бюджет.
+
+Товары из базы:
+{products_context}
+
+Вопрос клиента:
+{user_message}
 """
         )
 
