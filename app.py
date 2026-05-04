@@ -233,7 +233,6 @@ def search_products(user_message):
             },
             params={
                 "select": "brand,series,model,type,power,area_m2,price,description",
-                "is_active": "eq.true",
                 "limit": "30",
             },
             timeout=5,
