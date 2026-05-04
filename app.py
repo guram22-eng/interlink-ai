@@ -218,10 +218,12 @@ def save_chat(user_message, ai_reply, page_url):
     if phone:
         save_client(phone, user_message, page_url)
 
-
 def search_products(user_message):
+    print("KEY LEN:", len(SUPABASE_KEY) if SUPABASE_KEY else "NONE")
+    print("KEY START:", SUPABASE_KEY[:10] if SUPABASE_KEY else "NONE")
+
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("SUPABASE ENV ERROR: missing SUPABASE_URL or SUPABASE_KEY")
+        print("SUPABASE ENV ERROR")
         return []
 
     try:
