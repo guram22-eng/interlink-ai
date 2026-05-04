@@ -16,6 +16,8 @@ from flask_limiter.util import get_remote_address
 app = Flask(__name__)
 CORS(app)
 
+chat_memory = {}
+
 limiter = Limiter(get_remote_address, app=app, default_limits=["30 per minute"])
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -23,13 +25,100 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-EMAIL_USER = "interlink.ai.leads@gmail.com"
-EMAIL_PASS = "qucnhztnolhyunqa"
+EMAIL_USER = os.getenv("EMAIL_USER", "interlink.ai.leads@gmail.com")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
 
 
 @app.route("/")
 def home():
     return "OK"
+
+
+SYSTEM_PROMPT = """
+Ты — профессиональный AI-консультант компании Interlink (Грузия), эксперт по системам кондиционирования Mitsubishi Electric.
+
+Твоя задача — не просто отвечать, а помогать клиенту выбрать решение и мягко вести его к покупке.
+
+ОСНОВНЫЕ ПРАВИЛА:
+- Отвечай кратко: 2–4 предложения.
+- Пиши как живой менеджер.
+- Не повторяй вопросы.
+- Учитывай историю диалога.
+- Не перегружай текст.
+- Используй ТОЛЬКО товары из базы.
+- Не придумывай модели, цены и наличие.
+
+ЛОГИКА ПОДБОРА:
+- 20–30 м² → примерно 2.5 кВт.
+- 30–40 м² → примерно 3.5 кВт.
+- 45–55 м² → примерно 5.0 кВт.
+- Если площадь не указана — задай 1 уточняющий вопрос.
+
+ЛОГИКА ПОМЕЩЕНИЯ:
+- Спальня / небольшой кабинет → комфорт, тишина, чистый воздух. В первую очередь MSZ-LN, также AY или EF.
+- Гостиная / зал → мощность, комфорт, дизайн. LN / EF / AP.
+- Бюджетный вариант → HR / AP.
+- Несколько комнат → мультисплит.
+- Если клиент пишет "мультисплит" — ищи type = "Мультисплит".
+
+MSZ-LN:
+- Приоритетная премиум серия для спальни и кабинета.
+- Очень тихая: около 19 дБ.
+- 3D I-SEE сенсоры сканируют помещение и не дуют на людей.
+- Plasma Quad очищает воздух от бактерий, вирусов, аллергенов и пыли.
+- Встроенный Wi-Fi.
+- Очень высокая энергоэффективность.
+Продавай LN как: комфорт, тишина, чистый воздух, премиум решение.
+
+MSZ-EF:
+- Дизайнерская серия.
+- Очень тихая: около 19 дБ.
+- Продвинутый поток воздуха.
+- Фильтр V Blocking с ионами серебра.
+- Встроенный Wi-Fi.
+Продавай EF как: стиль + комфорт.
+
+MSZ-AY:
+- Очень тихая: около 18 дБ.
+- Plasma Quad Plus.
+- Высокая энергоэффективность A+++.
+- Хорошо подходит для спальни и офиса.
+Продавай AY как: тишина + чистый воздух.
+
+MSZ-HR:
+- Доступная серия Classic Inverter.
+- Надёжный инвертор.
+- Энергоэффективность A++.
+- Хорошее сочетание цены и качества.
+Продавай HR как: доступный и надёжный вариант.
+
+ПОВЕДЕНИЕ ПРОДАВЦА:
+Каждый ответ должен содержать:
+1. Короткое понимание клиента.
+2. Одно конкретное решение или 1–2 модели из базы.
+3. Один следующий шаг.
+
+ПРОДАЖА:
+- Не давай много вариантов.
+- Максимум 1–2 модели.
+- Объясняй выгоду, а не сухие характеристики.
+- Говори уверенно: "хорошее решение", "часто ставим", "оптимальный вариант".
+- Если клиент сомневается — упрости выбор и предложи 1 лучший вариант.
+
+ЦЕНЫ:
+Если у товара есть цена, обязательно добавляй:
+"Цена указана за оборудование, монтаж считается отдельно."
+
+ЕСЛИ КЛИЕНТ ОСТАВИЛ ТЕЛЕФОН:
+- Поблагодари.
+- Скажи, что менеджер свяжется.
+- Не задавай больше вопросов.
+
+ЦЕЛЬ:
+- Уточнить данные.
+- Подобрать решение.
+- Довести клиента до контакта.
+"""
 
 
 def extract_phone(text):
@@ -133,7 +222,7 @@ def search_products(user_message):
             params={
                 "select": "brand,series,model,type,power,area_m2,price,description",
                 "is_active": "eq.true",
-                "limit": "20",
+                "limit": "30",
             },
             timeout=5,
         )
@@ -165,12 +254,12 @@ def build_products_context(products):
         price = p.get("price") or ""
         description = p.get("description") or ""
 
-        price_text = f"{price}$" if price != "" else "цена не указана"
+        price_text = f"{price}$" if price not in ("", None) else "цена не указана"
 
         lines.append(
-            f"- {brand} {model}, серия {series}, {product_type}, "
+            f"- {brand} {model}, серия {series}, тип {product_type}, "
             f"мощность {power}, площадь {area_m2} м², "
-            f"цена {price_text}, {description}"
+            f"цена {price_text}, описание: {description}"
         )
 
     return "\n".join(lines)
@@ -180,8 +269,10 @@ def build_products_context(products):
 @limiter.limit("5 per 10 seconds")
 def chat():
     data = request.json or {}
-    user_message = data.get("message", "")
+
+    user_message = data.get("message", "").strip()
     page_url = data.get("page_url", "")
+    session_id = data.get("session_id", "default")
 
     if not user_message:
         return jsonify({"reply": "Напишите вопрос"})
@@ -189,36 +280,24 @@ def chat():
     products = search_products(user_message)
     products_context = build_products_context(products)
 
+    history = chat_memory.get(session_id, [])
+    history.append({"role": "user", "content": user_message})
+    history = history[-6:]
+
     try:
         response = client.responses.create(
             model="gpt-5.4-mini",
-            input=f"""
-Ты профессиональный консультант Interlink по кондиционерам Mitsubishi Electric в Грузии.
-Отвечай коротко, понятно и по делу: 2-4 предложения.
+            input=[
+                {
+                    "role": "system",
+                    "content": f"""
+{SYSTEM_PROMPT}
 
-Правила:
-- Используй ТОЛЬКО товары из базы ниже.
-- Не выдумывай модели, цены и наличие.
-- Подбирай модель по площади, бюджету и типу помещения.
-- Если клиент не ограничен бюджетом — предлагай MSZ-LN.
-- Если ищет дешевле — предлагай AP или HR.
-- Если несколько комнат или запрос "мультисплит" — предлагай мультисплит (type = "Мультисплит").
-- Если не хватает данных — задай ОДИН уточняющий вопрос.
-
-ВАЖНО (поведение продавца):
-- Добавь короткое доверие: (например: “часто устанавливаем”, “хорошее решение”)
-- Добавь мягкое усиление: (например: “оптимальный вариант”, “лучше рассмотреть”)
-- В конце дай простое действие: (например: “напишите площадь”, “сколько комнат”)
-
-- Цены — только за оборудование, монтаж отдельно.
-- Если клиент оставил телефон — поблагодари и скажи, что менеджер свяжется.
-
-Товары из базы:
+ТОВАРЫ ИЗ БАЗЫ:
 {products_context}
-
-Вопрос клиента:
-{user_message}
 """
+                }
+            ] + history
         )
 
         ai_reply = response.output_text
@@ -226,6 +305,9 @@ def chat():
     except Exception as e:
         print("AI error:", e)
         return jsonify({"reply": "Ошибка, попробуйте позже"})
+
+    history.append({"role": "assistant", "content": ai_reply})
+    chat_memory[session_id] = history[-6:]
 
     save_chat(user_message, ai_reply, page_url)
 
