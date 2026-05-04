@@ -37,14 +37,13 @@ def home():
 SYSTEM_PROMPT = """
 Ты — профессиональный AI-консультант компании Interlink (Грузия), эксперт по системам кондиционирования Mitsubishi Electric.
 
-Твоя задача — не просто отвечать, а помогать клиенту выбрать решение и мягко вести его к покупке.
+Твоя задача — помогать клиенту выбрать решение и мягко вести его к покупке.
 
 ОСНОВНЫЕ ПРАВИЛА:
 - Отвечай кратко: 2–4 предложения.
 - Пиши как живой менеджер.
 - Не повторяй вопросы.
 - Учитывай историю диалога.
-- Не перегружай текст.
 - Используй ТОЛЬКО товары из базы.
 - Не придумывай модели, цены и наличие.
 
@@ -55,14 +54,14 @@ SYSTEM_PROMPT = """
 - Если площадь не указана — задай 1 уточняющий вопрос.
 
 ЛОГИКА ПОМЕЩЕНИЯ:
-- Спальня / небольшой кабинет → комфорт, тишина, чистый воздух. В первую очередь MSZ-LN, также AY или EF.
-- Гостиная / зал → мощность, комфорт, дизайн. LN / EF / AP.
+- Спальня / небольшой кабинет → MSZ-LN, AY или EF.
+- Гостиная / зал → LN / EF / AP.
 - Бюджетный вариант → HR / AP.
 - Несколько комнат → мультисплит.
 - Если клиент пишет "мультисплит" — ищи type = "Мультисплит".
 
 MSZ-LN:
-- Приоритетная премиум серия для спальни и кабинета.
+- Премиум серия для спальни и кабинета.
 - Очень тихая: около 19 дБ.
 - 3D I-SEE сенсоры сканируют помещение и не дуют на людей.
 - Plasma Quad очищает воздух от бактерий, вирусов, аллергенов и пыли.
@@ -222,6 +221,7 @@ def save_chat(user_message, ai_reply, page_url):
 
 def search_products(user_message):
     if not SUPABASE_URL or not SUPABASE_KEY:
+        print("SUPABASE ENV ERROR: missing SUPABASE_URL or SUPABASE_KEY")
         return []
 
     try:
@@ -233,10 +233,13 @@ def search_products(user_message):
             },
             params={
                 "select": "brand,series,model,type,power,area_m2,price,description",
-                "limit": "30",
+                "limit": "100",
             },
             timeout=5,
         )
+
+        print("SUPABASE STATUS:", response.status_code)
+        print("SUPABASE DATA:", response.text[:2000])
 
         if response.status_code != 200:
             print("products error:", response.status_code, response.text)
@@ -262,7 +265,7 @@ def build_products_context(products):
         product_type = p.get("type") or ""
         power = p.get("power") or ""
         area_m2 = p.get("area_m2") or ""
-        price = p.get("price") or ""
+        price = p.get("price")
         description = p.get("description") or ""
 
         price_text = f"{price}$" if price not in ("", None) else "цена не указана"
