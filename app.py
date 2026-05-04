@@ -58,14 +58,42 @@ def send_email(subject, body):
     threading.Thread(target=_send, daemon=True).start()
 
 
+def supabase_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def save_client(phone, user_message, page_url):
+    if not phone or not SUPABASE_URL or not SUPABASE_KEY:
+        return
+
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/clients",
+            headers=supabase_headers(),
+            json={
+                "phone": phone,
+                "source": "site_chat",
+                "notes": f"{user_message}\nСтраница: {page_url}",
+                "status": "new",
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print("save client error:", e)
+
+
 def save_chat(user_message, ai_reply, page_url):
     phone = extract_phone(user_message)
     status = "lead" if phone else "new"
 
     if status == "lead":
         send_email(
-            "Новый лид",
-            f"{user_message}\nТелефон: {phone}\n{page_url}"
+            "Новый лид Interlink",
+            f"Сообщение: {user_message}\nТелефон: {phone}\nСтраница: {page_url}"
         )
 
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -74,11 +102,7 @@ def save_chat(user_message, ai_reply, page_url):
     try:
         requests.post(
             f"{SUPABASE_URL}/rest/v1/chat_logs",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json",
-            },
+            headers=supabase_headers(),
             json={
                 "user_message": user_message,
                 "ai_reply": ai_reply,
@@ -90,6 +114,9 @@ def save_chat(user_message, ai_reply, page_url):
         )
     except Exception as e:
         print("save chat error:", e)
+
+    if phone:
+        save_client(phone, user_message, page_url)
 
 
 def search_products(user_message):
@@ -106,7 +133,7 @@ def search_products(user_message):
             params={
                 "select": "brand,series,model,type,power,area_m2,price,description",
                 "is_active": "eq.true",
-                "limit": "8",
+                "limit": "20",
             },
             timeout=5,
         )
@@ -138,10 +165,12 @@ def build_products_context(products):
         price = p.get("price") or ""
         description = p.get("description") or ""
 
+        price_text = f"{price}$" if price != "" else "цена не указана"
+
         lines.append(
             f"- {brand} {model}, серия {series}, {product_type}, "
             f"мощность {power}, площадь {area_m2} м², "
-            f"цена {price}$, {description}"
+            f"цена {price_text}, {description}"
         )
 
     return "\n".join(lines)
@@ -152,6 +181,7 @@ def build_products_context(products):
 def chat():
     data = request.json or {}
     user_message = data.get("message", "")
+    page_url = data.get("page_url", "")
 
     if not user_message:
         return jsonify({"reply": "Напишите вопрос"})
@@ -166,11 +196,14 @@ def chat():
 Ты эксперт Interlink. Отвечай коротко, 2-3 предложения.
 
 Правила:
+- Подбирай модель по площади, бюджету и типу помещения.
 - Если клиент не ограничен бюджетом — предлагай MSZ-LN в первую очередь.
+- Если клиент ищет дешевле — предложи AP или HR, если они есть в базе.
 - Цены указываются только за оборудование.
 - Монтаж считается отдельно.
 - Не выдумывай модели и цены.
 - Используй товары только из базы ниже.
+- Если клиент оставил телефон — поблагодари и скажи, что менеджер свяжется.
 - Если точного товара нет, скажи что лучше уточнить площадь, тип помещения и бюджет.
 
 Товары из базы:
@@ -187,7 +220,7 @@ def chat():
         print("AI error:", e)
         return jsonify({"reply": "Ошибка, попробуйте позже"})
 
-    save_chat(user_message, ai_reply, "")
+    save_chat(user_message, ai_reply, page_url)
 
     return jsonify({"reply": ai_reply})
 
