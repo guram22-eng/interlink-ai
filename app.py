@@ -23,8 +23,7 @@ limiter = Limiter(get_remote_address, app=app, default_limits=["30 per minute"])
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip()
-SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()
-
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvYndxZWd0dmR3eG1xZ2R5aXFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1ODIwNjIsImV4cCI6MjA5MzE1ODA2Mn0.bG58qcoforxpXgQ7hTnFaT9H7aoE3hTcYCBzqinqpNA"
 EMAIL_USER = os.getenv("EMAIL_USER", "interlink.ai.leads@gmail.com")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 
