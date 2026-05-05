@@ -339,6 +339,15 @@ def chat():
     user_message = data.get("message", "").strip()
     page_url = data.get("page_url", "")
     session_id = data.get("session_id", "default")
+    lang = data.get("lang", "ru")
+
+    LANG_RULES = {
+        "ru": "Отвечай ТОЛЬКО на русском языке.",
+        "ka": "უპასუხე მხოლოდ ქართულ ენაზე.",
+        "en": "Reply ONLY in English."
+    }
+
+    language_rule = LANG_RULES.get(lang, LANG_RULES["ru"])
 
     if not user_message:
         return jsonify({"reply": "Напишите вопрос"})
@@ -358,6 +367,8 @@ def chat():
                     "role": "system",
                     "content": f"""
 {SYSTEM_PROMPT}
+
+{language_rule}
 
 ТОВАРЫ ИЗ БАЗЫ:
 {products_context}
